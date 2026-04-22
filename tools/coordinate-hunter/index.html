@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>座標獵人</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap');
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #111;
+      color: #f0f0f0;
+      font-family: 'Noto Sans TC', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      gap: 20px;
+    }
+
+    h1 {
+      font-size: 2rem;
+      letter-spacing: 0.15em;
+      color: #ff8c00;
+      text-shadow: 0 0 12px #ff8c0066;
+    }
+
+    /* ── 頂部資訊列 ── */
+    .hud {
+      display: flex;
+      gap: 40px;
+      align-items: center;
+      font-size: 1.2rem;
+    }
+
+    .hud-item span {
+      color: #ff8c00;
+      font-size: 1.8rem;
+      font-weight: 700;
+    }
+
+    #timer.danger { color: #ff3333; animation: blink 0.5s infinite alternate; }
+    @keyframes blink { from { opacity: 1; } to { opacity: 0.3; } }
+
+    /* ── 棋盤 ── */
+    .board-wrap {
+      position: relative;
+      display: inline-block;
+    }
+
+    canvas {
+      display: block;
+      border: 2px solid #ff8c0055;
+      border-radius: 4px;
+      cursor: default;
+    }
+
+    /* ── 輸入區 ── */
+    .input-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    input[type="text"] {
+      background: #222;
+      border: 2px solid #ff8c00;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 1.2rem;
+      padding: 8px 14px;
+      width: 150px;
+      outline: none;
+      text-align: center;
+      letter-spacing: 0.1em;
+    }
+    input[type="text"]::placeholder { color: #666; }
+    input[type="text"]:focus { border-color: #ffb347; box-shadow: 0 0 8px #ff8c0055; }
+
+    button {
+      background: #ff8c00;
+      border: none;
+      border-radius: 6px;
+      color: #111;
+      cursor: pointer;
+      font-size: 1rem;
+      font-weight: 700;
+      padding: 9px 22px;
+      transition: background 0.15s;
+    }
+    button:hover { background: #ffb347; }
+    button:active { background: #e07000; }
+
+    #msg {
+      font-size: 1rem;
+      min-height: 1.4em;
+      color: #aaa;
+      letter-spacing: 0.05em;
+    }
+    #msg.hit  { color: #4dff91; font-weight: 700; }
+    #msg.miss { color: #ff4d4d; }
+    #msg.dup  { color: #ffcc00; }
+
+    /* ── 結算畫面 ── */
+    #overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      z-index: 10;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+    }
+    #overlay.show { display: flex; }
+
+    .result-box {
+      background: #1a1a1a;
+      border: 2px solid #ff8c00;
+      border-radius: 12px;
+      padding: 40px 60px;
+      text-align: center;
+    }
+    .result-box h2 { font-size: 2rem; color: #ff8c00; margin-bottom: 12px; }
+    .result-box .score-big {
+      font-size: 5rem;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1;
+    }
+    .result-box .score-big em { color: #ff8c00; font-style: normal; }
+    .result-box p { margin-top: 12px; color: #aaa; font-size: 1rem; }
+
+    #btn-restart {
+      font-size: 1.2rem;
+      padding: 12px 36px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>🎯 座標獵人</h1>
+
+<div class="hud">
+  <div class="hud-item">得分 <span id="score">0</span></div>
+  <div class="hud-item">剩餘時間 <span id="timer">60</span> 秒</div>
+  <div class="hud-item">剩餘目標 <span id="remaining">10</span></div>
+</div>
+
+<canvas id="board" width="500" height="500"></canvas>
+
+<div class="input-row">
+  <input id="guess" type="text" placeholder="x,y　例：2,-3" maxlength="8" autocomplete="off" />
+  <button id="btn-submit">射擊！</button>
+</div>
+
+<div id="msg">輸入座標，按「射擊！」開始！</div>
+
+<!-- 結算 -->
+<div id="overlay">
+  <div class="result-box">
+    <h2>⏰ 時間到！</h2>
+    <div class="score-big" id="final-score"><em>0</em> / 10</div>
+    <p id="result-comment"></p>
+  </div>
+  <button id="btn-restart">🔄 再玩一次</button>
+</div>
+
+<script>
+  const GRID = 11;       // 11×11
+  const RANGE = 5;       // -5 ~ 5
+  const TOTAL = 10;
+  const TIME  = 60;
+
+  const canvas    = document.getElementById('board');
+  const ctx       = canvas.getContext('2d');
+  const scoreEl   = document.getElementById('score');
+  const timerEl   = document.getElementById('timer');
+  const remainEl  = document.getElementById('remaining');
+  const guessEl   = document.getElementById('guess');
+  const msgEl     = document.getElementById('msg');
+  const overlay   = document.getElementById('overlay');
+  const finalEl   = document.getElementById('final-score');
+  const commentEl = document.getElementById('result-comment');
+
+  const W = canvas.width;
+  const H = canvas.height;
+  const PAD = 36;            // 邊距（留給軸標）
+  const CELL = (W - PAD * 2) / (GRID - 1);  // 格距
+
+  let targets = [];   // [{x,y}]
+  let hits    = new Set();  // "x,y"
+  let guessed = new Set();
+  let score   = 0;
+  let timeLeft = TIME;
+  let timer   = null;
+  let running = false;
+
+  /* ── 座標轉畫布像素 ── */
+  function toPixel(gx, gy) {
+    return {
+      px: PAD + (gx + RANGE) * CELL,
+      py: H - PAD - (gy + RANGE) * CELL
+    };
+  }
+
+  /* ── 產生隨機目標 ── */
+  function genTargets() {
+    const set = new Set();
+    while (set.size < TOTAL) {
+      const x = Math.floor(Math.random() * GRID) - RANGE;
+      const y = Math.floor(Math.random() * GRID) - RANGE;
+      set.add(`${x},${y}`);
+    }
+    return [...set].map(k => { const [x,y] = k.split(',').map(Number); return {x,y}; });
+  }
+
+  /* ── 畫棋盤 ── */
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    // 背景
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0, 0, W, H);
+
+    // 格線
+    ctx.strokeStyle = '#2a2a2a';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < GRID; i++) {
+      const { px } = toPixel(i - RANGE, 0);
+      const { py } = toPixel(0, i - RANGE);
+      // 垂直
+      ctx.beginPath(); ctx.moveTo(px, PAD); ctx.lineTo(px, H - PAD); ctx.stroke();
+      // 水平
+      ctx.beginPath(); ctx.moveTo(PAD, py); ctx.lineTo(W - PAD, py); ctx.stroke();
+    }
+
+    // x 軸 & y 軸（橘色加粗）
+    ctx.strokeStyle = '#ff8c0088';
+    ctx.lineWidth = 2;
+    const origin = toPixel(0, 0);
+    ctx.beginPath(); ctx.moveTo(PAD, origin.py); ctx.lineTo(W - PAD, origin.py); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(origin.px, PAD); ctx.lineTo(origin.px, H - PAD); ctx.stroke();
+
+    // 軸標籤
+    ctx.fillStyle = '#888';
+    ctx.font = '11px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    for (let v = -RANGE; v <= RANGE; v++) {
+      if (v === 0) continue;
+      const { px } = toPixel(v, 0);
+      ctx.fillText(v, px, H - PAD + 4);
+    }
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    for (let v = -RANGE; v <= RANGE; v++) {
+      if (v === 0) continue;
+      const { py } = toPixel(0, v);
+      ctx.fillText(v, PAD - 5, py);
+    }
+    // 原點
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = '#ff8c00';
+    ctx.fillText('O', origin.px - 4, origin.py + 3);
+
+    // 格點（小圓點）
+    for (let gx = -RANGE; gx <= RANGE; gx++) {
+      for (let gy = -RANGE; gy <= RANGE; gy++) {
+        const { px, py } = toPixel(gx, gy);
+        ctx.beginPath();
+        ctx.arc(px, py, 2, 0, Math.PI * 2);
+        ctx.fillStyle = '#444';
+        ctx.fill();
+      }
+    }
+
+    // 已猜錯的（灰叉）
+    guessed.forEach(key => {
+      if (!hits.has(key)) {
+        const [gx, gy] = key.split(',').map(Number);
+        const { px, py } = toPixel(gx, gy);
+        ctx.strokeStyle = '#555';
+        ctx.lineWidth = 1.5;
+        const r = 5;
+        ctx.beginPath(); ctx.moveTo(px-r,py-r); ctx.lineTo(px+r,py+r); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(px+r,py-r); ctx.lineTo(px-r,py+r); ctx.stroke();
+      }
+    });
+
+    // 命中的（橘色大圓 + 打勾）
+    hits.forEach(key => {
+      const [gx, gy] = key.split(',').map(Number);
+      const { px, py } = toPixel(gx, gy);
+      ctx.beginPath();
+      ctx.arc(px, py, 10, 0, Math.PI * 2);
+      ctx.fillStyle = '#ff8c0033';
+      ctx.strokeStyle = '#ff8c00';
+      ctx.lineWidth = 2;
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#ff8c00';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('✓', px, py);
+    });
+
+    // 遊戲結束後顯示所有目標
+    if (!running && timeLeft === 0) {
+      targets.forEach(({x, y}) => {
+        const key = `${x},${y}`;
+        if (!hits.has(key)) {
+          const { px, py } = toPixel(x, y);
+          ctx.beginPath();
+          ctx.arc(px, py, 8, 0, Math.PI * 2);
+          ctx.fillStyle = '#ff333333';
+          ctx.strokeStyle = '#ff3333';
+          ctx.lineWidth = 1.5;
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#ff3333';
+          ctx.font = '10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('✕', px, py);
+        }
+      });
+    }
+  }
+
+  /* ── 開始遊戲 ── */
+  function startGame() {
+    targets  = genTargets();
+    hits     = new Set();
+    guessed  = new Set();
+    score    = 0;
+    timeLeft = TIME;
+    running  = true;
+
+    scoreEl.textContent   = 0;
+    timerEl.textContent   = TIME;
+    timerEl.className     = '';
+    remainEl.textContent  = TOTAL;
+    msgEl.textContent     = '輸入座標，按「射擊！」開始！';
+    msgEl.className       = '';
+    overlay.classList.remove('show');
+
+    guessEl.value = '';
+    guessEl.disabled = false;
+    guessEl.focus();
+
+    clearInterval(timer);
+    timer = setInterval(tick, 1000);
+    draw();
+  }
+
+  /* ── 倒數 ── */
+  function tick() {
+    timeLeft--;
+    timerEl.textContent = timeLeft;
+    if (timeLeft <= 10) timerEl.className = 'danger';
+    if (timeLeft <= 0) endGame();
+  }
+
+  /* ── 結束 ── */
+  function endGame() {
+    clearInterval(timer);
+    running = false;
+    guessEl.disabled = true;
+    draw(); // 顯示未命中目標
+
+    finalEl.innerHTML = `<em>${score}</em> / 10`;
+    const comments = [
+      [10, '🏆 滿分！你是座標神射手！'],
+      [8,  '🎯 太厲害了！幾乎全中！'],
+      [6,  '👍 不錯！繼續練習！'],
+      [4,  '📐 還不錯，多練幾次！'],
+      [0,  '💪 加油！再試一次！']
+    ];
+    const c = comments.find(([min]) => score >= min);
+    commentEl.textContent = c ? c[1] : '';
+    overlay.classList.add('show');
+  }
+
+  /* ── 判斷猜測 ── */
+  function submitGuess() {
+    if (!running) return;
+    const raw = guessEl.value.trim().replace(/\s/g, '');
+    guessEl.value = '';
+    guessEl.focus();
+
+    // 解析 "x,y"
+    const parts = raw.split(',');
+    if (parts.length !== 2) {
+      showMsg('格式錯誤！請輸入 x,y　例：2,-3', 'miss'); return;
+    }
+    const x = parseInt(parts[0], 10);
+    const y = parseInt(parts[1], 10);
+    if (isNaN(x) || isNaN(y)) {
+      showMsg('請輸入整數！', 'miss'); return;
+    }
+    if (x < -RANGE || x > RANGE || y < -RANGE || y > RANGE) {
+      showMsg(`範圍是 -${RANGE} 到 ${RANGE}！`, 'miss'); return;
+    }
+
+    const key = `${x},${y}`;
+    if (guessed.has(key)) {
+      showMsg(`(${x}, ${y}) 已經猜過了！`, 'dup'); return;
+    }
+
+    guessed.add(key);
+    const isHit = targets.some(t => t.x === x && t.y === y);
+
+    if (isHit) {
+      hits.add(key);
+      score++;
+      scoreEl.textContent = score;
+      remainEl.textContent = TOTAL - hits.size;
+      showMsg(`🎯 命中！(${x}, ${y})`, 'hit');
+      if (hits.size === TOTAL) endGame();  // 全部命中提早結束
+    } else {
+      showMsg(`💨 未命中 (${x}, ${y})`, 'miss');
+    }
+    draw();
+  }
+
+  function showMsg(text, cls) {
+    msgEl.textContent = text;
+    msgEl.className = cls || '';
+  }
+
+  /* ── 事件 ── */
+  document.getElementById('btn-submit').addEventListener('click', submitGuess);
+  guessEl.addEventListener('keydown', e => { if (e.key === 'Enter') submitGuess(); });
+  document.getElementById('btn-restart').addEventListener('click', startGame);
+
+  // 啟動
+  startGame();
+</script>
+</body>
+</html>
